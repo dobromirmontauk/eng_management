@@ -258,21 +258,46 @@ class GitAnalyzer:
         Returns:
             DataFrame with weekly aggregated data by contributor
         """
+        return self.get_grouped_dataframe('week')
+    
+    def get_grouped_dataframe(self, group_by: str = 'week') -> pd.DataFrame:
+        """
+        Get aggregated DataFrame grouped by specified time period.
+        
+        Args:
+            group_by: Grouping period ('day', 'week', 'month')
+            
+        Returns:
+            DataFrame with aggregated data by contributor and time period
+        """
         if self.df is None:
             return pd.DataFrame()
         
+        # Create grouping column based on the specified period
+        if group_by == 'day':
+            self.df['period_start'] = self.df['date'].dt.date
+        elif group_by == 'week':
+            self.df['period_start'] = self.df['date'].apply(
+                lambda x: (x - timedelta(days=x.weekday())).date()
+            )
+        elif group_by == 'month':
+            self.df['period_start'] = self.df['date'].apply(
+                lambda x: x.replace(day=1).date()
+            )
+        else:
+            raise ValueError(f"Invalid group_by option: {group_by}. Must be 'day', 'week', or 'month'")
         
-        # Aggregate by week and contributor using DataFrame operations
-        weekly_data = self.df.groupby(['week_start', 'author']).agg({
+        # Aggregate by period and contributor using DataFrame operations
+        grouped_data = self.df.groupby(['period_start', 'author']).agg({
             'commit_hash': 'count',  # Count commits
             'lines_added': 'sum',
             'lines_deleted': 'sum'
         }).reset_index()
         
         # Rename columns
-        weekly_data.columns = ['week_start', 'contributor', 'commits', 'lines_added', 'lines_deleted']
+        grouped_data.columns = ['period_start', 'contributor', 'commits', 'lines_added', 'lines_deleted']
         
-        return weekly_data.sort_values(['week_start', 'contributor']).reset_index(drop=True)
+        return grouped_data.sort_values(['period_start', 'contributor']).reset_index(drop=True)
     
     def export_to_json(self, output_file: str) -> None:
         """
@@ -356,12 +381,12 @@ class GitAnalyzer:
             recent_weeks = sorted(recent_weeks, reverse=True)[:10]
             
             # Filter to only show data from these 10 weeks
-            recent_data = weekly_data[weekly_data['week_start'].isin(recent_weeks)]
+            recent_data = weekly_data[weekly_data['period_start'].isin(recent_weeks)]
             
             # Format the DataFrame for better display
             display_data = recent_data.copy()
-            display_data['week_start'] = display_data['week_start'].astype(str)
-            display_data = display_data.sort_values(['week_start', 'commits'], ascending=[False, False])
+            display_data['period_start'] = display_data['period_start'].astype(str)
+            display_data = display_data.sort_values(['period_start', 'commits'], ascending=[False, False])
             
             # Limit to top 20 rows to keep output manageable
             print(display_data.head(20).to_string(index=False))

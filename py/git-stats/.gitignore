@@ -44,3 +44,6 @@ vision_stats.csv
 vision_stats.json
 recent_stats.csv
 recent_stats.json
+
+# Streamlit logs
+streamlit.log

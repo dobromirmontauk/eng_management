@@ -40,12 +40,41 @@ def main():
     # Expand tilde paths
     repo_paths = [os.path.expanduser(path.strip()) for path in repo_paths if path.strip()]
     
-    # Since date input
-    since_date = st.sidebar.text_input(
-        "Since Date",
-        value="1 year ago",
-        help="Limit analysis to commits since this date (e.g., '1 year ago', '2024-01-01')"
+    # Since date dropdown
+    since_options = {
+        "1 week": "1 week ago",
+        "1 month": "1 month ago", 
+        "3 months": "3 months ago",
+        "6 months": "6 months ago",
+        "1 year": "1 year ago",
+        "2 years": "2 years ago",
+        "All time": None
+    }
+    
+    since_selection = st.sidebar.selectbox(
+        "Analysis Period",
+        options=list(since_options.keys()),
+        index=4,  # Default to "1 year"
+        help="Select the time period for analysis"
     )
+    
+    since_date = since_options[since_selection]
+    
+    # Group by dropdown
+    group_by_options = {
+        "Day": "day",
+        "Week": "week", 
+        "Month": "month"
+    }
+    
+    group_by_selection = st.sidebar.selectbox(
+        "Group By",
+        options=list(group_by_options.keys()),
+        index=1,  # Default to "Week"
+        help="Select the time grouping for the analysis"
+    )
+    
+    group_by = group_by_options[group_by_selection]
     
     # Analyze button
     if st.sidebar.button("🔍 Analyze Repositories", type="primary"):
@@ -101,35 +130,36 @@ def main():
     
     st.markdown("---")
     
-    # Get weekly data
-    weekly_data = analyzer.get_weekly_dataframe()
+    # Get grouped data based on selection
+    grouped_data = analyzer.get_grouped_dataframe(group_by)
     
-    if weekly_data.empty:
-        st.warning("No weekly data available.")
+    if grouped_data.empty:
+        st.warning(f"No {group_by} data available.")
         return
     
-    # Convert week_start to datetime for plotting
-    weekly_data['week_start'] = pd.to_datetime(weekly_data['week_start'])
+    # Convert period_start to datetime for plotting
+    grouped_data['period_start'] = pd.to_datetime(grouped_data['period_start'])
     
     # Create tabs for different visualizations
-    tab1, tab2, tab3, tab4 = st.tabs(["📈 Weekly Commits", "👥 Contributors", "📊 Raw Data", "📋 Summary"])
+    period_label = group_by.capitalize() + "ly" if group_by != "day" else "Daily"
+    tab1, tab2, tab3, tab4 = st.tabs([f"📈 {period_label} Commits", "👥 Contributors", "📊 Raw Data", "📋 Summary"])
     
     with tab1:
-        st.header("Weekly Commits by Contributor")
+        st.header(f"{period_label} Commits by Contributor")
         
         # Create stacked bar chart
         fig = px.bar(
-            weekly_data,
-            x='week_start',
+            grouped_data,
+            x='period_start',
             y='commits',
             color='contributor',
-            title="Commits per Week by Contributor",
-            labels={'week_start': 'Week', 'commits': 'Number of Commits', 'contributor': 'Contributor'},
+            title=f"Commits per {group_by.capitalize()} by Contributor",
+            labels={'period_start': group_by.capitalize(), 'commits': 'Number of Commits', 'contributor': 'Contributor'},
             color_discrete_sequence=px.colors.qualitative.Set3
         )
         
         fig.update_layout(
-            xaxis_title="Week",
+            xaxis_title=group_by.capitalize(),
             yaxis_title="Commits",
             legend_title="Contributor",
             height=500,
@@ -145,13 +175,13 @@ def main():
         col1, col2 = st.columns(2)
         
         with col1:
-            st.subheader("Most Active Weeks")
-            weekly_totals = weekly_data.groupby('week_start')['commits'].sum().sort_values(ascending=False)
-            st.dataframe(weekly_totals.head(10), use_container_width=True)
+            st.subheader(f"Most Active {group_by.capitalize()}s")
+            period_totals = grouped_data.groupby('period_start')['commits'].sum().sort_values(ascending=False)
+            st.dataframe(period_totals.head(10), use_container_width=True)
         
         with col2:
-            st.subheader("Weekly Activity Distribution")
-            st.bar_chart(weekly_totals.tail(10))
+            st.subheader(f"{group_by.capitalize()}ly Activity Distribution")
+            st.bar_chart(period_totals.tail(10))
     
     with tab2:
         st.header("Contributor Analysis")
@@ -245,7 +275,7 @@ def main():
         col1, col2 = st.columns(2)
         
         with col1:
-            st.metric("Average Commits per Week", f"{len(df) / weekly_data['week_start'].nunique():.1f}")
+            st.metric(f"Average Commits per {group_by.capitalize()}", f"{len(df) / grouped_data['period_start'].nunique():.1f}")
             st.metric("Most Active Day", df['date'].dt.day_name().mode().iloc[0])
             st.metric("Average Lines per Commit", f"{df['lines_added'].mean():.1f}")
         
