@@ -76,6 +76,22 @@ def main():
     
     group_by = group_by_options[group_by_selection]
     
+    # Contributor filter (populated after analysis)
+    available_contributors = st.session_state.get('available_contributors', [])
+    selected_contributors = st.sidebar.multiselect(
+        "Filter Contributors",
+        options=available_contributors,
+        default=available_contributors,  # Show all by default
+        help="Select specific contributors to focus on. Leave empty to show all contributors."
+    )
+    
+    # Show contributor count
+    if available_contributors:
+        if selected_contributors:
+            st.sidebar.info(f"📊 Showing {len(selected_contributors)} of {len(available_contributors)} contributors")
+        else:
+            st.sidebar.info(f"📊 Showing all {len(available_contributors)} contributors")
+    
     # Analyze button
     if st.sidebar.button("🔍 Analyze Repositories", type="primary"):
         with st.spinner("Analyzing repositories..."):
@@ -87,6 +103,7 @@ def main():
                 # Store results in session state
                 st.session_state.analyzer = analyzer
                 st.session_state.analysis_complete = True
+                st.session_state.available_contributors = analyzer.df['author'].unique().tolist()
                 
                 st.sidebar.success(f"✅ Analyzed {len(analyzer.df)} commits")
                 
@@ -140,6 +157,56 @@ def main():
     # Convert period_start to datetime for plotting
     grouped_data['period_start'] = pd.to_datetime(grouped_data['period_start'])
     
+    # Global filters above tabs
+    st.markdown("### 🔍 Global Filters")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Global contributor filter - only show if we have contributors
+        # Get contributors from the analyzer data
+        if analyzer is not None and analyzer.df is not None:
+            all_contributors = analyzer.df['author'].unique().tolist()
+            global_contributors = st.multiselect(
+                "Filter Contributors",
+                options=all_contributors,
+                default=all_contributors,  # Show all by default
+                help="Select specific contributors to focus on. Affects all charts and data below."
+            )
+        else:
+            st.info("No contributors available. Please analyze repositories first.")
+            global_contributors = []
+    
+    with col2:
+        # Global date range filter
+        date_range = st.date_input(
+            "Date Range",
+            value=(df['date'].min().date(), df['date'].max().date()),
+            min_value=df['date'].min().date(),
+            max_value=df['date'].max().date(),
+            help="Filter data by date range. Affects all charts and data below."
+        )
+    
+    # Apply global filters to all data
+    if global_contributors:
+        grouped_data = grouped_data[grouped_data['contributor'].isin(global_contributors)]
+        df_filtered = df[df['author'].isin(global_contributors)]
+    else:
+        df_filtered = df.copy()
+    
+    # Apply date filter
+    if len(date_range) == 2:
+        df_filtered = df_filtered[
+            (df_filtered['date'].dt.date >= date_range[0]) &
+            (df_filtered['date'].dt.date <= date_range[1])
+        ]
+        # Also filter grouped data by date range
+        grouped_data = grouped_data[
+            (grouped_data['period_start'].dt.date >= date_range[0]) &
+            (grouped_data['period_start'].dt.date <= date_range[1])
+        ]
+    
+    st.markdown("---")
+    
     # Create tabs for different visualizations
     period_label = group_by.capitalize() + "ly" if group_by != "day" else "Daily"
     tab1, tab2, tab3, tab4 = st.tabs([f"📈 {period_label} Commits", "👥 Contributors", "📊 Raw Data", "📋 Summary"])
@@ -186,8 +253,14 @@ def main():
     with tab2:
         st.header("Contributor Analysis")
         
-        # Get contributor summary
-        contributor_summary = analyzer.get_contributor_summary()
+        # Get contributor summary from filtered data
+        contributor_summary = df_filtered.groupby('author').agg({
+            'commit_hash': 'count',
+            'lines_added': 'sum',
+            'lines_deleted': 'sum'
+        }).reset_index()
+        contributor_summary.columns = ['author', 'commit_hash', 'lines_added', 'lines_deleted']
+        contributor_summary = contributor_summary.sort_values('commit_hash', ascending=False)
         
         col1, col2 = st.columns(2)
         
@@ -226,36 +299,11 @@ def main():
     with tab3:
         st.header("Raw Data")
         
-        # Data filters
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            selected_contributors = st.multiselect(
-                "Filter by Contributors",
-                options=df['author'].unique(),
-                default=df['author'].unique()
-            )
-        
-        with col2:
-            date_range = st.date_input(
-                "Date Range",
-                value=(df['date'].min().date(), df['date'].max().date()),
-                min_value=df['date'].min().date(),
-                max_value=df['date'].max().date()
-            )
-        
-        # Filter data
-        filtered_df = df[
-            (df['author'].isin(selected_contributors)) &
-            (df['date'].dt.date >= date_range[0]) &
-            (df['date'].dt.date <= date_range[1])
-        ]
-        
-        st.subheader(f"Filtered Data ({len(filtered_df)} commits)")
-        st.dataframe(filtered_df, use_container_width=True)
+        st.subheader(f"Filtered Data ({len(df_filtered)} commits)")
+        st.dataframe(df_filtered, use_container_width=True)
         
         # Download button
-        csv = filtered_df.to_csv(index=False)
+        csv = df_filtered.to_csv(index=False)
         st.download_button(
             label="📥 Download CSV",
             data=csv,
@@ -275,14 +323,14 @@ def main():
         col1, col2 = st.columns(2)
         
         with col1:
-            st.metric(f"Average Commits per {group_by.capitalize()}", f"{len(df) / grouped_data['period_start'].nunique():.1f}")
-            st.metric("Most Active Day", df['date'].dt.day_name().mode().iloc[0])
-            st.metric("Average Lines per Commit", f"{df['lines_added'].mean():.1f}")
+            st.metric(f"Average Commits per {group_by.capitalize()}", f"{len(df_filtered) / grouped_data['period_start'].nunique():.1f}")
+            st.metric("Most Active Day", df_filtered['date'].dt.day_name().mode().iloc[0])
+            st.metric("Average Lines per Commit", f"{df_filtered['lines_added'].mean():.1f}")
         
         with col2:
-            st.metric("Total Contributors", df['author'].nunique())
-            st.metric("Date Range", f"{(df['date'].max() - df['date'].min()).days} days")
-            st.metric("Commits per Day", f"{len(df) / (df['date'].max() - df['date'].min()).days:.1f}")
+            st.metric("Total Contributors", df_filtered['author'].nunique())
+            st.metric("Date Range", f"{(df_filtered['date'].max() - df_filtered['date'].min()).days} days")
+            st.metric("Commits per Day", f"{len(df_filtered) / (df_filtered['date'].max() - df_filtered['date'].min()).days:.1f}")
 
 
 if __name__ == "__main__":
