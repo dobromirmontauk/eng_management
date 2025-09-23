@@ -2,6 +2,8 @@
 
 # External dependencies
 pandas>=1.3.0
+streamlit>=1.28.0
+plotly>=5.15.0
 
 # The following modules are used from Python standard library:
 # - os
