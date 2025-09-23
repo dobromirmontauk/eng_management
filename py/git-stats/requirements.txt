@@ -1,0 +1,22 @@
+# Git Stats Tool Requirements
+
+# External dependencies
+pandas>=1.3.0
+
+# The following modules are used from Python standard library:
+# - os
+# - subprocess
+# - glob
+# - datetime
+# - collections
+# - typing
+# - json
+# - csv
+
+# Setup Instructions:
+# 1. Create a virtual environment: python3 -m venv venv
+# 2. Activate the virtual environment: source venv/bin/activate
+# 3. Install dependencies: pip install -r requirements.txt
+# 4. Run the tool: python3 cli.py <repository_paths...> [options]
+
+# Git must be installed on the system for this tool to work
