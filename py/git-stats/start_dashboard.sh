@@ -48,7 +48,8 @@ pkill -f "streamlit.*8501" 2>/dev/null || true
 
 # Start Streamlit app in background
 echo -e "${YELLOW}🚀 Starting Streamlit dashboard...${NC}"
-nohup python -m streamlit run git_stats/streamlit_app.py --server.headless true --server.port 8501 --server.address 0.0.0.0 > streamlit.log 2>&1 &
+cd "$(dirname "$0")/.."  # Go to py directory
+nohup python -m streamlit run git-stats/streamlit_app.py --server.headless true --server.port 8501 --server.address 0.0.0.0 > git-stats/streamlit.log 2>&1 &
 STREAMLIT_PID=$!
 
 # Wait a moment for the app to start

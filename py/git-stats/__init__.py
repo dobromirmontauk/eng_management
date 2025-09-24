@@ -1,11 +1,11 @@
 """
-Git Stats - Git Repository Analysis Tool
+Git Stats - Git repository statistics analysis tool.
 
-This package provides tools for analyzing Git repositories and generating
-statistics about commits and lines of code by week and contributor.
+This package provides tools for analyzing Git repository statistics including
+commit patterns, contributor activity, and lines of code changes.
 """
 
-from .git_analyzer import GitAnalyzer, CommitStats
+from .git_analyzer import GitAnalyzer
 
 __version__ = "1.0.0"
-__all__ = ['GitAnalyzer', 'CommitStats']
+__all__ = ["GitAnalyzer"]
