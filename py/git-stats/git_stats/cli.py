@@ -6,10 +6,7 @@ Command-line interface for Git Stats tool.
 import sys
 import os
 
-# Add the parent directory to the path so we can import git_analyzer
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from git_analyzer import GitAnalyzer
+from .git_analyzer import GitAnalyzer
 
 
 def main():
