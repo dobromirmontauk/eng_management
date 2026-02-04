@@ -1,5 +1,4 @@
-import google.generativeai as genai
-import os
+from google import genai
 
 def render_email_gemini(template_str, candidate_data, api_key):
     """
@@ -8,8 +7,7 @@ def render_email_gemini(template_str, candidate_data, api_key):
     if not api_key:
         raise ValueError("Gemini API Key is required for email generation.")
         
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-pro')
+    client = genai.Client(api_key=api_key)
     
     prompt = f"""
 You are a professional recruiter drafting an outreach email.
@@ -38,7 +36,11 @@ LinkedIn Profile Text (Unstructured):
 }}
 """
     try:
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(
+            model='gemini-2.0-flash', 
+            contents=prompt
+        )
+        
         # Attempt to parse JSON response. 
         # Gemini might wrap in ```json ... ```
         content = response.text.replace('```json', '').replace('```', '').strip()
@@ -49,5 +51,5 @@ LinkedIn Profile Text (Unstructured):
         
     except Exception as e:
         print(f"Error generating email with Gemini: {e}")
-        print(f"Raw response might have been: {response.text if 'response' in locals() else 'N/A'}")
+        # print(f"Raw response might have been: {response.text if 'response' in locals() else 'N/A'}")
         return "Error Generating Email", f"Failed to generate email. Error: {e}"
