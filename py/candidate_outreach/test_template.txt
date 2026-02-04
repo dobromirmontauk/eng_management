@@ -1,0 +1,14 @@
+Subject: Role at [Your Company]
+
+Hi {{ name }},
+
+I came across your profile and was impressed by your experience. 
+
+[Instructions for AI]:
+- Mention their last 3 jobs specifically to show I've done my research.
+- If they went to college, mention something nice about their university alumni.
+- Keep the tone professional but warm.
+- Ask if they are open to a chat about a new Engineering Manager role.
+
+Best,
+The Recruiting Team
