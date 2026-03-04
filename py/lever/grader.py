@@ -49,11 +49,20 @@ class GradeResult:
     total_cost: float   # USD
 
 
-async def grade_resume(client: anthropic.AsyncAnthropic, pdf_bytes: bytes,
+MEDIA_TYPES = {
+    "pdf": "application/pdf",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "doc": "application/msword",
+}
+
+
+async def grade_resume(client: anthropic.AsyncAnthropic, resume_bytes: bytes,
                        grading_prompt: str, candidate_name: str,
                        job_description: Optional[str] = None,
-                       model: str = "claude-sonnet-4-6") -> Optional[GradeResult]:
-    pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
+                       model: str = "claude-sonnet-4-6",
+                       file_ext: str = "pdf") -> Optional[GradeResult]:
+    resume_b64 = base64.standard_b64encode(resume_bytes).decode("utf-8")
+    media_type = MEDIA_TYPES.get(file_ext, "application/pdf")
 
     user_text = f"Candidate name: {candidate_name}\n\n"
     if job_description:
@@ -72,8 +81,8 @@ async def grade_resume(client: anthropic.AsyncAnthropic, pdf_bytes: bytes,
                         "type": "document",
                         "source": {
                             "type": "base64",
-                            "media_type": "application/pdf",
-                            "data": pdf_b64,
+                            "media_type": media_type,
+                            "data": resume_b64,
                         },
                     },
                     {

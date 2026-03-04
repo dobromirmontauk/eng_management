@@ -51,7 +51,7 @@ async def process_candidate(
 
         # Download resume
         print(f"  [{name}] Downloading resume...")
-        pdf_bytes = await lever.download_resume_pdf(opp_id)
+        pdf_bytes, ext = await lever.download_resume(opp_id)
 
         if pdf_bytes is None:
             action = "skipped"
@@ -72,7 +72,7 @@ async def process_candidate(
         wait = 5
         while True:
             try:
-                grade_result = await grade_resume(claude, pdf_bytes, grading_prompt, name, job_description, model=model)
+                grade_result = await grade_resume(claude, pdf_bytes, grading_prompt, name, job_description, model=model, file_ext=ext)
                 break
             except (anthropic.RateLimitError, anthropic.APIConnectionError) as e:
                 last_error = e
@@ -217,7 +217,22 @@ async def async_main():
         opportunities = await lever.get_opportunities(
             source_stage_id, posting_ids=args.posting_ids, limit=args.limit,
             created_at_start=created_at_start)
-        print(f"Found {len(opportunities)} candidate(s).\n")
+        print(f"Found {len(opportunities)} application(s).")
+
+        # Deduplicate: one opportunity per contact (person)
+        seen_contacts = set()
+        unique_opps = []
+        for opp in opportunities:
+            contact = opp.get("contact")
+            if contact in seen_contacts:
+                continue
+            seen_contacts.add(contact)
+            unique_opps.append(opp)
+        if len(unique_opps) < len(opportunities):
+            print(f"Deduplicated to {len(unique_opps)} unique candidate(s).\n")
+        else:
+            print()
+        opportunities = unique_opps
 
         if not opportunities:
             print("No candidates to review.")

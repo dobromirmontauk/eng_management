@@ -123,12 +123,16 @@ class LeverClient:
         except Exception:
             return posting_id[:12]
 
-    async def download_resume_pdf(self, opportunity_id: str) -> Optional[bytes]:
+    async def download_resume(self, opportunity_id: str) -> tuple:
+        """Download resume and return (bytes, extension). Returns (None, None) if no resume."""
         data = await self.get(f"/opportunities/{opportunity_id}/resumes")
         resumes = data.get("data", [])
         if not resumes:
-            return None
-        resume_id = resumes[0]["id"]
-        return await self.get_binary(
+            return None, None
+        resume = resumes[0]
+        resume_id = resume["id"]
+        ext = resume.get("file", {}).get("ext", "").lower().lstrip(".")
+        content = await self.get_binary(
             f"/opportunities/{opportunity_id}/resumes/{resume_id}/download"
         )
+        return content, ext
