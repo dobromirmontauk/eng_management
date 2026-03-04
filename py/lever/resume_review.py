@@ -12,11 +12,13 @@ Usage:
 
 import os
 import sys
+import csv
 import json
 import time
 import base64
 import argparse
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Optional
 
 import requests
@@ -155,6 +157,13 @@ def download_resume_pdf(opportunity_id: str) -> Optional[bytes]:
 CRITERIA_KEYS = ["school", "pedigree", "startup", "shipped", "career", "published"]
 CRITERIA_HEADERS = ["Schl", "Pdgr", "Strt", "Ship", "Crer", "Publ"]
 
+# Cost per million tokens (input, output) by model
+MODEL_COSTS = {
+    "claude-opus-4-6": (15.0, 75.0),
+    "claude-sonnet-4-6": (3.0, 15.0),
+    "claude-haiku-4-5-20251001": (0.80, 4.0),
+}
+
 
 @dataclass
 class GradeResult:
@@ -162,6 +171,11 @@ class GradeResult:
     scores: dict  # per-criterion scores keyed by CRITERIA_KEYS
     reasoning: str
     raw_response: str
+    input_tokens: int
+    output_tokens: int
+    input_cost: float   # USD
+    output_cost: float  # USD
+    total_cost: float   # USD
 
 
 def grade_resume(pdf_bytes: bytes, grading_prompt: str, candidate_name: str,
@@ -217,6 +231,12 @@ Do not include any other text before or after the JSON."""
         ],
     )
 
+    # Calculate cost
+    usage = message.usage
+    input_rate, output_rate = MODEL_COSTS.get(model, (3.0, 15.0))
+    input_cost = usage.input_tokens * input_rate / 1_000_000
+    output_cost = usage.output_tokens * output_rate / 1_000_000
+
     raw_text = message.content[0].text
     # Strip markdown code fences if present
     cleaned = raw_text.strip()
@@ -234,6 +254,11 @@ Do not include any other text before or after the JSON."""
             scores=scores,
             reasoning=result["reasoning"],
             raw_response=raw_text,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            input_cost=input_cost,
+            output_cost=output_cost,
+            total_cost=input_cost + output_cost,
         )
     except (json.JSONDecodeError, KeyError) as e:
         print(f"  Warning: Could not parse Claude response: {e}")
@@ -268,6 +293,8 @@ def main():
                              "claude-opus-4-6 ($5/$25 per MTok, most capable), "
                              "claude-sonnet-4-6 ($3/$15, best speed/quality balance, default), "
                              "claude-haiku-4-5-20251001 ($1/$5, fastest/cheapest)")
+    parser.add_argument("--no-archive-bad-resume", action="store_true", default=False,
+                        help="Don't archive candidates with missing or invalid resumes (default: archive them)")
     parser.add_argument("--posting-ids", nargs="+", default=None,
                         help="Only process candidates for these posting IDs (space-separated)")
     parser.add_argument("--limit", type=int, default=None,
@@ -312,7 +339,8 @@ def main():
         target_stage_id = find_stage_id(args.advance_stage_name)
 
     archive_reason_id = None
-    if args.archive_below is not None:
+    needs_archive_reason = args.archive_below is not None or not args.no_archive_bad_resume
+    if needs_archive_reason:
         print(f"Finding archive reason '{args.archive_reason_text}'...")
         archive_reason_id = find_archive_reason_id(args.archive_reason_text)
 
@@ -328,9 +356,44 @@ def main():
         print("No candidates to review.")
         return
 
+    # Set up CSV output
+    csv_path = f"results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    csv_fields = ["name", "opportunity_id"] + CRITERIA_KEYS + [
+        "total", "result", "action", "input_tokens", "output_tokens",
+        "input_cost", "output_cost", "total_cost", "reasoning"]
+    csv_file = open(csv_path, "w", newline="")
+    csv_writer = csv.DictWriter(csv_file, fieldnames=csv_fields)
+    csv_writer.writeheader()
+    csv_file.flush()
+    print(f"Writing results to {csv_path}\n")
+
+    def print_summary(results, csv_path):
+        csv_file.close()
+        print(f"\nResults saved to {csv_path}\n")
+        criteria_hdr = " ".join(f"{h:<5}" for h in CRITERIA_HEADERS)
+        print("=" * 100)
+        print("SUMMARY")
+        print("=" * 100)
+        print(f"{'Name':<25} {criteria_hdr} {'Total':<6} {'Result':<6} {'Action':<10}")
+        print("-" * 100)
+        for r in results:
+            display_name = r["name"][:23] + ".." if len(r["name"]) > 25 else r["name"]
+            if r["scores"]:
+                scores_str = " ".join(f"{r['scores'].get(k, 0):<5}" for k in CRITERIA_KEYS)
+            else:
+                scores_str = " ".join(f"{'—':<5}" for _ in CRITERIA_KEYS)
+            status = "PASS" if r["passed"] else ("FAIL" if r["passed"] is not None else "N/A")
+            print(f"{display_name:<25} {scores_str} {r['score']:<6} {status:<6} {r['action']:<10}")
+        passed_count = sum(1 for r in results if r["passed"] is True)
+        failed_count = sum(1 for r in results if r["passed"] is False)
+        skipped_count = sum(1 for r in results if r["passed"] is None)
+        total_cost = sum(r.get("total_cost", 0) for r in results)
+        print(f"\nTotal: {len(results)} | Passed: {passed_count} | Failed: {failed_count} | Skipped: {skipped_count} | Cost: ${total_cost:.4f}")
+
     # Process each candidate
     results = []
-    for i, opp in enumerate(opportunities, 1):
+    try:
+      for i, opp in enumerate(opportunities, 1):
         name = opp.get("name", "Unknown")
         opp_id = opp["id"]
         print(f"[{i}/{len(opportunities)}] {name}")
@@ -340,8 +403,17 @@ def main():
         pdf_bytes = download_resume_pdf(opp_id)
 
         if pdf_bytes is None:
-            print("  No resume found. Skipping.")
-            results.append({"name": name, "score": 0, "scores": {}, "passed": None, "action": "skipped", "reasoning": "no resume"})
+            action = "skipped"
+            if archive_reason_id and not args.no_archive_bad_resume:
+                print("  No resume found. Archiving.")
+                add_note(opp_id, "[AI Resume Review] No resume attached — archived automatically.")
+                archive_opportunity(opp_id, archive_reason_id)
+                action = "archived"
+            else:
+                print("  No resume found. Skipping.")
+            results.append({"name": name, "score": 0, "scores": {}, "passed": None, "action": action, "reasoning": "no resume"})
+            csv_writer.writerow({"name": name, "opportunity_id": opp_id, "total": 0, "result": "N/A", "action": action, "reasoning": "no resume"})
+            csv_file.flush()
             continue
 
         # Grade with Claude
@@ -349,8 +421,17 @@ def main():
         try:
             grade_result = grade_resume(pdf_bytes, grading_prompt, name, job_description, model=args.model)
         except anthropic.BadRequestError as e:
-            print(f"  Invalid PDF, skipping: {e}")
-            results.append({"name": name, "score": 0, "scores": {}, "passed": None, "action": "skipped", "reasoning": "invalid PDF"})
+            action = "skipped"
+            if archive_reason_id and not args.no_archive_bad_resume:
+                print(f"  Invalid PDF. Archiving.")
+                add_note(opp_id, "[AI Resume Review] Invalid/corrupt resume PDF — archived automatically.")
+                archive_opportunity(opp_id, archive_reason_id)
+                action = "archived"
+            else:
+                print(f"  Invalid PDF, skipping: {e}")
+            results.append({"name": name, "score": 0, "scores": {}, "passed": None, "action": action, "reasoning": "invalid PDF"})
+            csv_writer.writerow({"name": name, "opportunity_id": opp_id, "total": 0, "result": "N/A", "action": action, "reasoning": "invalid PDF"})
+            csv_file.flush()
             continue
 
         if grade_result is None:
@@ -359,7 +440,7 @@ def main():
 
         passed = grade_result.score >= args.pass_threshold
         status = "PASS" if passed else "FAIL"
-        print(f"  Result: {status} (Score: {grade_result.score}, threshold: {args.pass_threshold})")
+        print(f"  Result: {status} (Score: {grade_result.score}, threshold: {args.pass_threshold}) — ${grade_result.total_cost:.4f}")
         print(f"  Reasoning: {grade_result.reasoning}")
         if args.verbose:
             print(f"  Full response: {grade_result.raw_response}")
@@ -380,29 +461,21 @@ def main():
             action = "archived"
 
         results.append({"name": name, "score": grade_result.score, "scores": grade_result.scores,
-                         "passed": passed, "action": action, "reasoning": grade_result.reasoning})
+                         "passed": passed, "action": action, "reasoning": grade_result.reasoning,
+                         "total_cost": grade_result.total_cost})
+        csv_row = {"name": name, "opportunity_id": opp_id, "total": grade_result.score,
+                   "result": status, "action": action,
+                   "input_tokens": grade_result.input_tokens, "output_tokens": grade_result.output_tokens,
+                   "input_cost": f"{grade_result.input_cost:.6f}", "output_cost": f"{grade_result.output_cost:.6f}",
+                   "total_cost": f"{grade_result.total_cost:.6f}", "reasoning": grade_result.reasoning}
+        csv_row.update({k: grade_result.scores.get(k, 0) for k in CRITERIA_KEYS})
+        csv_writer.writerow(csv_row)
+        csv_file.flush()
         print()
-
-    # Print summary
-    criteria_hdr = " ".join(f"{h:<5}" for h in CRITERIA_HEADERS)
-    print("=" * 100)
-    print("SUMMARY")
-    print("=" * 100)
-    print(f"{'Name':<25} {criteria_hdr} {'Total':<6} {'Result':<6} {'Action':<10}")
-    print("-" * 100)
-    for r in results:
-        display_name = r["name"][:23] + ".." if len(r["name"]) > 25 else r["name"]
-        if r["scores"]:
-            scores_str = " ".join(f"{r['scores'].get(k, 0):<5}" for k in CRITERIA_KEYS)
-        else:
-            scores_str = " ".join(f"{'—':<5}" for _ in CRITERIA_KEYS)
-        status = "PASS" if r["passed"] else ("FAIL" if r["passed"] is not None else "N/A")
-        print(f"{display_name:<25} {scores_str} {r['score']:<6} {status:<6} {r['action']:<10}")
-
-    passed_count = sum(1 for r in results if r["passed"] is True)
-    failed_count = sum(1 for r in results if r["passed"] is False)
-    skipped_count = sum(1 for r in results if r["passed"] is None)
-    print(f"\nTotal: {len(results)} | Passed: {passed_count} | Failed: {failed_count} | Skipped: {skipped_count}")
+    except KeyboardInterrupt:
+        print("\n\nInterrupted! Printing results so far...\n")
+    finally:
+        print_summary(results, csv_path)
 
 
 if __name__ == "__main__":
