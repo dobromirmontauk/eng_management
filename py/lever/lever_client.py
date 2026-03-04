@@ -75,13 +75,16 @@ class LeverClient:
         sys.exit(1)
 
     async def get_opportunities(self, stage_id: str, posting_ids: Optional[list] = None,
-                                limit: Optional[int] = None) -> list:
+                                limit: Optional[int] = None,
+                                created_at_start: Optional[int] = None) -> list:
         opportunities = []
         offset = None
         while True:
             params = {"stage_id": stage_id, "archived": "false"}
             if posting_ids:
                 params["posting_id"] = posting_ids
+            if created_at_start:
+                params["created_at_start"] = created_at_start
             if offset:
                 params["offset"] = offset
             data = await self.get("/opportunities", params=params)

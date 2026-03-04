@@ -138,6 +138,8 @@ def parse_args():
                              "claude-opus-4-6 ($5/$25 per MTok, most capable), "
                              "claude-sonnet-4-6 ($3/$15, best speed/quality balance, default), "
                              "claude-haiku-4-5-20251001 ($1/$5, fastest/cheapest)")
+    parser.add_argument("--max-age-days", type=int, default=90,
+                        help="Only process candidates who applied within this many days (default: 90)")
     parser.add_argument("--no-archive-bad-resume", action="store_true", default=False,
                         help="Don't archive candidates with missing or invalid resumes (default: archive them)")
     parser.add_argument("--posting-ids", nargs="+", default=None,
@@ -200,11 +202,16 @@ async def async_main():
             archive_reason_id = await lever.find_archive_reason_id(args.archive_reason_text)
 
         # Fetch candidates
+        from datetime import datetime, timedelta
+        cutoff = datetime.now() - timedelta(days=args.max_age_days)
+        created_at_start = int(cutoff.timestamp() * 1000)  # Lever uses ms
         if args.posting_ids:
-            print(f"Fetching candidates in stage '{args.stage_name}' for {len(args.posting_ids)} posting(s)...")
+            print(f"Fetching candidates in stage '{args.stage_name}' for {len(args.posting_ids)} posting(s) (last {args.max_age_days} days)...")
         else:
-            print(f"Fetching candidates in stage '{args.stage_name}' (all postings)...")
-        opportunities = await lever.get_opportunities(source_stage_id, posting_ids=args.posting_ids, limit=args.limit)
+            print(f"Fetching candidates in stage '{args.stage_name}' (all postings, last {args.max_age_days} days)...")
+        opportunities = await lever.get_opportunities(
+            source_stage_id, posting_ids=args.posting_ids, limit=args.limit,
+            created_at_start=created_at_start)
         print(f"Found {len(opportunities)} candidate(s).\n")
 
         if not opportunities:
