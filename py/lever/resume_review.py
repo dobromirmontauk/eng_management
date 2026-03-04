@@ -55,19 +55,20 @@ async def process_candidate(
             writer.write_skip(name, opp_id, action, "no resume")
             return
 
-        # Grade with Claude (retry on rate limit)
+        # Grade with Claude (retry with backoff up to 1 hour)
         print(f"  [{name}] Grading with Claude...")
         grade_result = None
         last_error = None
-        for attempt in range(3):
+        wait = 5
+        while True:
             try:
                 grade_result = await grade_resume(claude, pdf_bytes, grading_prompt, name, job_description, model=model)
                 break
-            except anthropic.RateLimitError as e:
+            except (anthropic.RateLimitError, anthropic.APIConnectionError) as e:
                 last_error = e
-                wait = 2 ** attempt * 5
-                print(f"  [{name}] Rate limited, retrying in {wait}s...")
+                print(f"  [{name}] {type(e).__name__}, retrying in {wait}s...")
                 await asyncio.sleep(wait)
+                wait = min(wait * 2, 3600)
             except anthropic.BadRequestError:
                 action = "skipped"
                 if archive_reason_id and archive_bad_resume:
@@ -82,9 +83,10 @@ async def process_candidate(
 
         if grade_result is None:
             if last_error:
-                print(f"  [{name}] Rate limit retries exhausted: {last_error}")
-            print(f"  [{name}] Failed to grade. Crashing to avoid bad data.")
-            sys.exit(1)
+                print(f"  [{name}] Retries exhausted: {last_error}")
+            print(f"  [{name}] Failed to grade. Skipping.")
+            writer.write_skip(name, opp_id, "error", "grading failed")
+            return
 
         passed = grade_result.score >= pass_threshold
         status = "PASS" if passed else "FAIL"
@@ -229,7 +231,12 @@ async def async_main():
         ]
 
         try:
-            await asyncio.gather(*tasks)
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            errors = [r for r in results if isinstance(r, Exception)]
+            if errors:
+                print(f"\n{len(errors)} candidate(s) failed with unexpected errors:")
+                for e in errors:
+                    print(f"  {type(e).__name__}: {e}")
         except KeyboardInterrupt:
             print("\n\nInterrupted! Printing results so far...\n")
         finally:
