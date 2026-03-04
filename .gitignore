@@ -1,6 +1,9 @@
 venv/
 __pycache__/
 *.pyc
+*.swp
 .DS_Store
 credentials.json
 token.json
+.env
+py/lever/*.sh

@@ -1,4 +1,5 @@
 import os.path
+import json
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -26,7 +27,28 @@ def get_credentials(credentials_path='credentials.json', token_path='token.json'
             creds.refresh(Request())
         else:
             if not os.path.exists(credentials_path):
-                raise FileNotFoundError(f"Credentials file not found at {credentials_path}. Please download it from Google Cloud Console.")
+                print(f"\n[!] Credentials file not found at '{credentials_path}'.")
+                print("Go to Google Cloud Console -> APIs & Services -> Credentials.")
+                print("Create 'OAuth client ID' (Application type: Desktop app).")
+                print("Download the JSON file, OR verify it's in this directory.")
+                print("\nAlternatively, open the JSON file in a text editor, copy the content, and paste it below.")
+                
+                try:
+                    # Use input() to read from stdin (user interaction)
+                    json_content = input("Paste your credentials JSON here: ").strip()
+                    if not json_content:
+                        raise ValueError("Empty input")
+                        
+                    # Validate JSON
+                    json.loads(json_content)
+                    
+                    # Save it
+                    with open(credentials_path, 'w') as f:
+                        f.write(json_content)
+                    print(f"Saved credentials to {credentials_path}.")
+                    
+                except Exception as e:
+                     raise FileNotFoundError(f"Missing {credentials_path} and failed to read input: {e}")
                 
             flow = InstalledAppFlow.from_client_secrets_file(
                 credentials_path, SCOPES)
