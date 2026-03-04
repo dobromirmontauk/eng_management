@@ -31,12 +31,16 @@ async def process_candidate(
     target_stage_id: Optional[str], advance_stage_name: Optional[str],
     archive_below: Optional[float], archive_reason_id: Optional[str],
     archive_reason_text: Optional[str], archive_bad_resume: bool,
-    writer: ResultWriter, verbose: bool,
+    posting_names: dict, writer: ResultWriter, verbose: bool,
 ):
     """Process a single candidate: download, grade, act, record."""
     async with semaphore:
         name = opp.get("name", "Unknown")
         opp_id = opp["id"]
+        # Look up posting name from first application
+        apps = opp.get("applications", [])
+        posting_id = apps[0].get("posting", "") if apps else ""
+        posting_name = posting_names.get(posting_id, "") if posting_names else ""
         print(f"[{i}/{total}] {name}")
 
         # Download resume
@@ -52,7 +56,7 @@ async def process_candidate(
                 action = "archived"
             else:
                 print(f"  [{name}] No resume found. Skipping.")
-            writer.write_skip(name, opp_id, action, "no resume")
+            writer.write_skip(name, opp_id, action, "no resume", posting=posting_name)
             return
 
         # Grade with Claude (retry with backoff up to 1 hour)
@@ -78,14 +82,14 @@ async def process_candidate(
                     action = "archived"
                 else:
                     print(f"  [{name}] Invalid PDF, skipping.")
-                writer.write_skip(name, opp_id, action, "invalid PDF")
+                writer.write_skip(name, opp_id, action, "invalid PDF", posting=posting_name)
                 return
 
         if grade_result is None:
             if last_error:
                 print(f"  [{name}] Retries exhausted: {last_error}")
             print(f"  [{name}] Failed to grade. Skipping.")
-            writer.write_skip(name, opp_id, "error", "grading failed")
+            writer.write_skip(name, opp_id, "error", "grading failed", posting=posting_name)
             return
 
         passed = grade_result.score >= pass_threshold
@@ -110,7 +114,7 @@ async def process_candidate(
             await lever.archive_opportunity(opp_id, archive_reason_id)
             action = "archived"
 
-        writer.write_grade(name, opp_id, grade_result, passed, status, action)
+        writer.write_grade(name, opp_id, grade_result, passed, status, action, posting=posting_name)
 
 
 def parse_args():
@@ -218,6 +222,13 @@ async def async_main():
             print("No candidates to review.")
             return
 
+        # Resolve posting IDs to human-readable names
+        posting_names = {}
+        if args.posting_ids:
+            print(f"Resolving {len(args.posting_ids)} posting name(s)...")
+            for pid in args.posting_ids:
+                posting_names[pid] = await lever.get_posting_name(pid)
+
         writer = ResultWriter()
         print(f"Writing results to {writer.csv_path}\n")
 
@@ -232,7 +243,7 @@ async def async_main():
                 archive_below=args.archive_below, archive_reason_id=archive_reason_id,
                 archive_reason_text=args.archive_reason_text,
                 archive_bad_resume=not args.no_archive_bad_resume,
-                writer=writer, verbose=args.verbose,
+                posting_names=posting_names, writer=writer, verbose=args.verbose,
             )
             for i, opp in enumerate(opportunities, 1)
         ]

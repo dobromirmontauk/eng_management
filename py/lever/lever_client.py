@@ -80,7 +80,7 @@ class LeverClient:
         opportunities = []
         offset = None
         while True:
-            params = {"stage_id": stage_id, "archived": "false"}
+            params = {"stage_id": stage_id, "archived": "false", "expand": "applications"}
             if posting_ids:
                 params["posting_id"] = posting_ids
             if created_at_start:
@@ -105,6 +105,14 @@ class LeverClient:
 
     async def add_note(self, opportunity_id: str, text: str):
         await self.post(f"/opportunities/{opportunity_id}/notes", {"value": text})
+
+    async def get_posting_name(self, posting_id: str) -> str:
+        """Fetch the human-readable name for a posting ID."""
+        try:
+            data = await self.get(f"/postings/{posting_id}")
+            return data["data"]["text"]
+        except Exception:
+            return posting_id[:12]
 
     async def download_resume_pdf(self, opportunity_id: str) -> Optional[bytes]:
         data = await self.get(f"/opportunities/{opportunity_id}/resumes")
