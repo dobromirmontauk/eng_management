@@ -43,6 +43,12 @@ async def process_candidate(
         posting_name = posting_names.get(posting_id, "") if posting_names else ""
         print(f"[{i}/{total}] {name}")
 
+        # Skip if already reviewed
+        if await lever.has_note_with_prefix(opp_id, "[AI Resume Review]"):
+            print(f"  [{name}] Already reviewed. Skipping.")
+            writer.write_skip(name, opp_id, "skipped", "already reviewed", posting=posting_name)
+            return
+
         # Download resume
         print(f"  [{name}] Downloading resume...")
         pdf_bytes = await lever.download_resume_pdf(opp_id)
@@ -128,10 +134,8 @@ def parse_args():
                         help="Pipeline stage to pull candidates from (default: 'New applicant')")
     parser.add_argument("--pass-threshold", type=float, default=4,
                         help="Minimum score to pass (default: 4)")
-    parser.add_argument("--advance-qualified", action="store_true", default=False,
-                        help="Advance passing candidates to the next stage")
     parser.add_argument("--advance-stage-name", default="Recruiter Screen",
-                        help="Stage to advance qualified candidates to (default: 'Recruiter Screen')")
+                        help="Stage to advance passing candidates to (default: 'Recruiter Screen')")
     parser.add_argument("--archive-below", type=float, default=None,
                         help="Archive candidates scoring at or below this threshold (e.g. --archive-below 2)")
     parser.add_argument("--archive-reason-text", default="Unqualified",
@@ -193,10 +197,8 @@ async def async_main():
         print(f"Finding stage '{args.stage_name}'...")
         source_stage_id = await lever.find_stage_id(args.stage_name)
 
-        target_stage_id = None
-        if args.advance_qualified:
-            print(f"Finding advance target stage '{args.advance_stage_name}'...")
-            target_stage_id = await lever.find_stage_id(args.advance_stage_name)
+        print(f"Finding advance target stage '{args.advance_stage_name}'...")
+        target_stage_id = await lever.find_stage_id(args.advance_stage_name)
 
         archive_reason_id = None
         needs_archive_reason = args.archive_below is not None or not args.no_archive_bad_resume

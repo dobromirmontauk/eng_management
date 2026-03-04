@@ -106,6 +106,15 @@ class LeverClient:
     async def add_note(self, opportunity_id: str, text: str):
         await self.post(f"/opportunities/{opportunity_id}/notes", {"value": text})
 
+    async def has_note_with_prefix(self, opportunity_id: str, prefix: str) -> bool:
+        """Check if an opportunity already has a note starting with the given prefix."""
+        data = await self.get(f"/opportunities/{opportunity_id}/notes")
+        for note in data.get("data", []):
+            for field in note.get("fields", []):
+                if field.get("value", "").startswith(prefix):
+                    return True
+        return False
+
     async def get_posting_name(self, posting_id: str) -> str:
         """Fetch the human-readable name for a posting ID."""
         try:
