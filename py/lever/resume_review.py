@@ -103,14 +103,13 @@ async def process_candidate(
         action = "graded"
         score_parts = " + ".join(str(grade_result.scores.get(k, 0)) for k in CRITERIA_KEYS)
         note_text = f"[AI Resume Review] {score_parts} = {grade_result.score} — {grade_result.reasoning}"
+        await lever.add_note(opp_id, note_text)
         if passed and target_stage_id:
             print(f"  [{name}] Advancing to '{advance_stage_name}'...")
-            await lever.add_note(opp_id, note_text)
             await lever.advance_opportunity(opp_id, target_stage_id)
             action = "advanced"
         elif archive_below is not None and grade_result.score <= archive_below and archive_reason_id:
             print(f"  [{name}] Archiving as '{archive_reason_text}' (score {grade_result.score} <= {archive_below})...")
-            await lever.add_note(opp_id, note_text)
             await lever.archive_opportunity(opp_id, archive_reason_id)
             action = "archived"
 

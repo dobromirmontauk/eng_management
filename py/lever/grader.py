@@ -8,8 +8,8 @@ from typing import Optional
 import anthropic
 
 
-CRITERIA_KEYS = ["school", "pedigree", "startup", "shipped", "career", "published"]
-CRITERIA_HEADERS = ["Schl", "Pdgr", "Strt", "Ship", "Crer", "Publ"]
+CRITERIA_KEYS = ["school", "pedigree", "startup", "shipped", "career", "published", "urm"]
+CRITERIA_HEADERS = ["Schl", "Pdgr", "Strt", "Ship", "Crer", "Publ", "URM"]
 
 # Cost per million tokens (input, output) by model
 MODEL_COSTS = {
@@ -27,7 +27,8 @@ Evaluate the resume against the criteria and respond with ONLY a JSON object in 
         "startup": <number>,
         "shipped": <number>,
         "career": <number>,
-        "published": <number>
+        "published": <number>,
+        "urm": <number>
     },
     "reasoning": "2-3 sentence explanation of your assessment"
 }

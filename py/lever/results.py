@@ -67,7 +67,7 @@ class ResultWriter:
         print("=" * 100)
         print(f"{'Name':<25} {criteria_hdr} {'Total':<6} {'Result':<6} {'Action':<10}")
         print("-" * 100)
-        for r in self.results:
+        for r in sorted(self.results, key=lambda r: r["score"], reverse=True):
             display_name = r["name"][:23] + ".." if len(r["name"]) > 25 else r["name"]
             if r["scores"]:
                 scores_str = " ".join(f"{r['scores'].get(k, 0):<5}" for k in CRITERIA_KEYS)
