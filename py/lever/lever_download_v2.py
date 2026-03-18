@@ -1,7 +1,7 @@
 """
-Download last 50 engineering candidates who went through On-site interviews.
-Approach: query by stage_id (current stage) across all post-onsite stages,
-filter to engineering roles, sort by lastAdvancedAt, take top 50, enrich.
+Download last 50 software engineering candidates who went through On-site interviews.
+Approach: query by the explicit posting IDs from review_eng.sh (active + archived),
+keep only those who reached the onsite stage or beyond, sort by lastAdvancedAt, enrich.
 """
 
 import json
@@ -27,21 +27,31 @@ BASE_URL = "https://api.lever.co/v1"
 ONSITE_STAGE_ID = "ba3541af-b2ac-4dd2-8433-660582e2924e"
 OUTPUT_DIR = Path("/sessions/lucid-happy-edison/mnt/lever")
 
-# All stages at/after onsite — candidates at these stages have been through onsite
-ONSITE_AND_BEYOND = {
-    "ba3541af-b2ac-4dd2-8433-660582e2924e": "On-site interview",
-    "e35ea840-3488-402f-9f86-e062ec0a5632": "Abhinai Stage",
-    "65e31017-f862-489f-9c74-7e6f5d95d757": "Reference check",
-    "offer": "Offer",
-}
-
-ENG_KEYWORDS = [
-    "engineer", "developer", "software", "hardware", "backend", "frontend",
-    "fullstack", "full-stack", "full stack", "infrastructure", "devops",
-    "machine learning", "computer vision", "deep learning", "technical lead",
-    "architect", "firmware", "electrical", "mechanical", "platform", "embedded",
-    "data engineer", "ai developer", "builder"
+# Software engineering posting IDs — sourced directly from review_eng.sh
+SW_ENG_POSTING_IDS = [
+    "a28b2c47-17dd-4e34-88a3-a31e0bc40902",
+    "d7a3d123-e0ff-4563-bf4c-b336124ca0ee",
+    "19a14c15-5e89-4fb2-be7a-5c1be01ba952",
+    "f3176417-e303-4bff-a17c-59715534bd26",
+    "da733114-d2b5-4abf-92e3-c034ce970a86",
+    "f7f9e38b-c319-4c85-aac3-50e08d888ebd",
+    "e1c61f69-a670-46cc-ac1c-1840dac4bc53",
+    "65f070bd-9864-4053-b46c-f512e9b513bb",
+    "254cf2cb-4013-44e4-b13e-cf0707f49ee3",
+    "3621bdb7-757a-4402-8657-7e8c9237235b",
+    "61092a1a-3e1b-4b70-8384-7abf807774e8",
+    "f82e7b37-9e91-416e-97b6-64449ab28f48",
+    "8063b092-4081-46db-8eee-df07f647b467",
+    "48b78db5-49c6-4e2b-9cf2-e2282da615ae",
+    "a2cd54bf-7a30-4ecb-ba62-755094100b27",
 ]
+
+ONSITE_STAGE_IDS = {
+    "ba3541af-b2ac-4dd2-8433-660582e2924e",  # On-site interview
+    "e35ea840-3488-402f-9f86-e062ec0a5632",  # Abhinai Stage (post-onsite)
+    "65e31017-f862-489f-9c74-7e6f5d95d757",  # Reference check
+    "offer",
+}
 
 client = httpx.Client(base_url=BASE_URL, auth=(API_KEY, ""), timeout=60.0)
 
@@ -76,10 +86,9 @@ def get_all_pages(endpoint, params=None):
     return items
 
 
-def is_engineering_candidate(opp, eng_posting_ids=None):
-    """Check if candidate is for an engineering role, using tags (job title is first tag)."""
-    tag_str = " ".join(t.lower() for t in opp.get("tags", []))
-    return any(kw in tag_str for kw in ENG_KEYWORDS)
+def reached_onsite(opp):
+    """Return True if the candidate's current stage is onsite or beyond."""
+    return opp.get("stage", "") in ONSITE_STAGE_IDS
 
 
 def fetch_interviews(opp_id):
@@ -103,17 +112,16 @@ def main():
     print("Lever: Last 50 Engineering Onsite Candidates (v2)")
     print("=" * 60)
 
-    # Step 1: Engineering posting IDs
-    print("\n[1/5] Loading engineering postings...")
+    # Step 1: Posting names for display
+    print("\n[1/5] Loading posting metadata...")
     all_postings = []
     for state in ["published", "closed", "internal", "draft"]:
         all_postings.extend(get_all_pages("/postings", params={"state": state}))
-    eng_posting_ids = {
-        p["id"] for p in all_postings
-        if any(kw in p.get("text", "").lower() for kw in ENG_KEYWORDS)
-    }
     posting_names = {p["id"]: p.get("text", p["id"]) for p in all_postings}
-    print(f"  Total postings: {len(all_postings)}, Engineering: {len(eng_posting_ids)}")
+    sw_eng_names = {pid: posting_names.get(pid, pid[:8]) for pid in SW_ENG_POSTING_IDS}
+    print(f"  SW eng postings ({len(SW_ENG_POSTING_IDS)}):")
+    for pid, name in sw_eng_names.items():
+        print(f"    {name}")
 
     # Step 2: Stage metadata + archive reasons
     print("\n[2/5] Loading metadata...")
@@ -127,8 +135,18 @@ def main():
     archive_data = rate_limited_get("/archive_reasons")
     archive_reasons = {r["id"]: r["text"] for r in archive_data.get("data", [])}
 
-    # Step 3: Fetch all candidates at onsite-or-beyond stages
-    print("\n[3/5] Fetching all candidates at onsite+ stages...")
+    SW_ENG_POSTING_SET = set(SW_ENG_POSTING_IDS)
+
+    # Step 3: Fetch all onsite+ candidates (active + archived) with applications expanded
+    # posting_id filter silently drops archived candidates, so we query by stage_id instead
+    # and use expand=applications to get the posting ID inline for filtering.
+    print("\n[3/5] Fetching all onsite+ candidates (active + archived) with posting info...")
+    ONSITE_AND_BEYOND = {
+        "ba3541af-b2ac-4dd2-8433-660582e2924e": "On-site interview",
+        "e35ea840-3488-402f-9f86-e062ec0a5632": "Abhinai Stage",
+        "65e31017-f862-489f-9c74-7e6f5d95d757": "Reference check",
+        "offer": "Offer",
+    }
     all_opps = {}
     for stage_id, stage_name in ONSITE_AND_BEYOND.items():
         for archived_val in ["false", "true"]:
@@ -136,21 +154,25 @@ def main():
                 "limit": 100,
                 "stage_id": stage_id,
                 "archived": archived_val,
+                "expand": "applications",
             })
             for opp in opps:
                 all_opps[opp["id"]] = opp
             label = "active" if archived_val == "false" else "archived"
             print(f"  {stage_name} ({label}): {len(opps)}")
 
-    print(f"  Total unique candidates: {len(all_opps)}")
+    print(f"  Total unique onsite+ candidates: {len(all_opps)}")
 
-    # Step 4: Filter to engineering + sort by lastAdvancedAt
-    print("\n[4/5] Filtering to engineering roles...")
-    eng_opps = [
-        opp for opp in all_opps.values()
-        if is_engineering_candidate(opp)
-    ]
-    print(f"  Engineering candidates at onsite+: {len(eng_opps)}")
+    # Step 4: Filter to SW eng postings using the expanded applications.posting field
+    print("\n[4/5] Filtering to SW eng postings...")
+    def is_sw_eng(opp):
+        for app in opp.get("applications", []):
+            if isinstance(app, dict) and app.get("posting") in SW_ENG_POSTING_SET:
+                return True
+        return False
+
+    eng_opps = [opp for opp in all_opps.values() if is_sw_eng(opp)]
+    print(f"  SW eng candidates who reached onsite+: {len(eng_opps)}")
 
     # Sort by lastAdvancedAt descending (most recently active first)
     eng_opps.sort(key=lambda x: -(x.get("lastAdvancedAt") or 0))
@@ -191,8 +213,9 @@ def main():
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output = {
         "downloaded_at": datetime.now().isoformat(),
-        "version": "v2",
-        "onsite_stage_id": ONSITE_STAGE_ID,
+        "version": "v3",
+        "sw_eng_posting_ids": SW_ENG_POSTING_IDS,
+        "onsite_stage_ids": list(ONSITE_STAGE_IDS),
         "stages": stages,
         "archive_reasons": archive_reasons,
         "posting_names": posting_names,

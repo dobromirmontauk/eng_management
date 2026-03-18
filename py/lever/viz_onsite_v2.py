@@ -39,11 +39,24 @@ IV_TYPES = [
     ("Other",            "#95a5a6", []),
 ]
 
+# Stage ID → interview type (authoritative — beats keyword matching)
+STAGE_TYPE_MAP = {
+    "ba3541af-b2ac-4dd2-8433-660582e2924e": "Onsite",           # On-site interview
+    "e35ea840-3488-402f-9f86-e062ec0a5632": "HM Screen",        # Abhinai Stage (behavioral)
+    "5c476846-962c-4bcc-b299-89a7a8f909be": "HM Screen",        # Hiring Manager Screen
+    "ec9dea12-d029-420b-836b-0ad5c633c4a1": "Phone Screen",     # Phone screen
+    "12a60d91-1ce3-46d9-9a5d-fa403ee12aa5": "Recruiter Screen", # Recruiter Screen
+    "eed7c7e4-eda1-4ea4-8ae9-7d3d2f21e7f5": "Technical",        # Assignment
+    "65e31017-f862-489f-9c74-7e6f5d95d757": "Reference",        # Reference check
+}
+
 def classify_interview(iv):
     subject = iv.get("subject", "").lower()
     stage   = iv.get("stage", "")
-    if stage == ONSITE_STAGE_ID:
-        return "Onsite"
+    # Stage ID is authoritative
+    if stage in STAGE_TYPE_MAP:
+        return STAGE_TYPE_MAP[stage]
+    # Fall back to subject keywords
     for name, color, keywords in IV_TYPES:
         if any(kw in subject for kw in keywords):
             return name
@@ -53,16 +66,18 @@ IV_COLOR = {name: color for name, color, _ in IV_TYPES}
 
 # ── Outcome colors ─────────────────────────────────────────────────────────────
 OUTCOME_COLORS = {
-    "Hired":                     "#1e8449",
-    "Offer Declined":            "#27ae60",
-    "Active in Another Pipeline":"#52be80",
-    "Still Active":              "#2980b9",
-    "Position Closed":           "#95a5a6",
-    "Timing":                    "#f39c12",
-    "Withdrew":                  "#e67e22",
-    "Unresponsive":              "#e74c3c",
-    "Unqualified":               "#c0392b",
-    "Role Not a Match":          "#922b21",
+    "Hired":                      "#1e8449",   # dark green — success
+    "Offer Declined":             "#e67e22",   # orange — so close, but no
+    "Active in Another Pipeline": "#2980b9",   # blue
+    "Still Active":               "#5dade2",   # light blue
+    "Position Closed":            "#95a5a6",   # grey
+    "Timing":                     "#f5b041",   # yellow
+    "Candidate Not Interested":   "#d35400",   # darker orange
+    "Withdrew":                   "#c0392b",   # red
+    "Unresponsive":               "#922b21",   # dark red
+    "Unqualified":                "#7b241c",   # darker red
+    "Role Not a Match":           "#6c3483",   # purple
+    "Do Not Recruit":             "#1a1a2e",   # near-black
 }
 
 def ts(ms): return datetime.fromtimestamp(ms / 1000)
@@ -88,13 +103,17 @@ class Candidate:
         else:
             self.outcome = "Still Active"
 
-        # Interviews (non-canceled only)
+        self.contact_id = opp.get("contact", self.id)
+        self.origin = opp.get("origin", "applied")  # "applied" | "sourced" | "referred"
+
+        # Interviews (non-canceled only, past AND future)
         self.interviews = []
         for iv in raw.get("interviews", []):
             if iv.get("canceledAt") or not iv.get("date"):
                 continue
             self.interviews.append({
                 "dt":       ts(iv["date"]),
+                "future":   ts(iv["date"]) > NOW,
                 "duration": iv.get("duration", 30),   # minutes
                 "subject":  iv.get("subject", ""),
                 "stage":    iv.get("stage", ""),
@@ -122,7 +141,24 @@ class Candidate:
         )
 
 
-candidates = [Candidate(r) for r in candidates_raw]
+_all_candidates = [Candidate(r) for r in candidates_raw]
+
+# Merge opportunities for the same person (same contact ID) into one row
+from collections import OrderedDict
+_by_contact = OrderedDict()
+for c in _all_candidates:
+    if c.contact_id not in _by_contact:
+        _by_contact[c.contact_id] = c
+    else:
+        # Merge: add interviews and feedback, keep most-recent outcome/last_advanced
+        existing = _by_contact[c.contact_id]
+        existing.interviews = sorted(existing.interviews + c.interviews, key=lambda x: x["dt"])
+        existing.feedback   = sorted(existing.feedback + c.feedback)
+        if (c.last_advanced_dt or NOW) > (existing.last_advanced_dt or NOW):
+            existing.last_advanced_dt = c.last_advanced_dt
+            existing.outcome = c.outcome
+
+candidates = list(_by_contact.values())
 # Sort newest last-activity first (newest at top of chart)
 candidates.sort(key=lambda c: -(c.last_advanced_dt.timestamp() if c.last_advanced_dt else 0))
 
@@ -151,14 +187,14 @@ ax_days    = fig.add_subplot(gs[1, 2])
 ax = ax_gantt
 ax.set_facecolor("#ffffff")
 
-# Date range: cover all interview dates
+# Date range: cover all interview dates including future ones
 all_iv_dts = [iv["dt"] for c in candidates for iv in c.interviews]
 if all_iv_dts:
-    t_min = min(all_iv_dts) - timedelta(days=4)
-    t_max = max(all_iv_dts) + timedelta(days=6)
+    t_min = min(all_iv_dts) - timedelta(days=10)
+    t_max = max(all_iv_dts) + timedelta(days=10)
 else:
     t_min = NOW - timedelta(days=180)
-    t_max = NOW + timedelta(days=7)
+    t_max = NOW + timedelta(days=30)
 
 # One day in matplotlib date units
 ONE_DAY = mdates.date2num(NOW + timedelta(days=1)) - mdates.date2num(NOW)
@@ -166,7 +202,24 @@ ONE_DAY = mdates.date2num(NOW + timedelta(days=1)) - mdates.date2num(NOW)
 for row_i, cand in enumerate(candidates):
     y = (N - 1 - row_i)   # newest at top
 
+    # Alternating row background shading
+    if row_i % 2 == 0:
+        ax.axhspan(y - 0.5, y + 0.5, facecolor="#f0f2f5", alpha=0.6, zorder=0)
+
     ivs = cand.interviews
+
+    # "Entered system" bar — from createdAt to first interview, colored by origin
+    ORIGIN_COLOR = {"applied": "#2471a3", "sourced": "#117a65", "referred": "#884ea0"}
+    if cand.created_dt:
+        x_applied = mdates.date2num(cand.created_dt)
+        if ivs:
+            x_first_iv = mdates.date2num(ivs[0]["dt"])
+        else:
+            x_first_iv = x_applied + ONE_DAY * 2
+        origin_color = ORIGIN_COLOR.get(cand.origin, "#888888")
+        ax.barh(y, x_first_iv - x_applied, left=x_applied,
+                height=BAR, color=origin_color, alpha=0.45, zorder=2,
+                edgecolor="white", linewidth=0.3)
 
     # Colored bars spanning interview-to-interview gaps
     # Each bar goes from interview[i] → interview[i+1], colored by interview[i]'s type
@@ -198,21 +251,37 @@ for row_i, cand in enumerate(candidates):
     ax.text(mdates.date2num(t_min) - 0.5, y, short,
             ha="right", va="center", fontsize=7, color="#1a1a2e")
 
-    # Outcome label on the right
+    # Outcome label: just after the last interview bar
+    if ivs:
+        last_iv = ivs[-1]
+        dur_days = max(last_iv["duration"] / (60 * 24), 0.35)
+        x_after = mdates.date2num(last_iv["dt"]) + dur_days * ONE_DAY + ONE_DAY * 0.4
+    elif cand.last_advanced_dt:
+        x_after = mdates.date2num(cand.last_advanced_dt) + ONE_DAY * 0.4
+    else:
+        x_after = mdates.date2num(t_min) + ONE_DAY
     oc_color = OUTCOME_COLORS.get(cand.outcome, "#888888")
-    ax.text(mdates.date2num(t_max) + 0.3, y, cand.outcome,
+    ax.text(x_after, y, cand.outcome,
             ha="left", va="center", fontsize=6.5,
             color=oc_color, style="italic", fontweight="bold")
 
-# Axes formatting
+# "Today" divider
+ax.axvline(mdates.date2num(NOW), color="#333333", linewidth=1.2,
+           linestyle="--", zorder=5, alpha=0.5)
+ax.text(mdates.date2num(NOW), N - 0.2, " today",
+        fontsize=7.5, color="#333333", va="top", alpha=0.7)
+
+# Axes formatting — monthly ticks across the 2-year span
 ax.xaxis_date()
-ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
-ax.xaxis.set_major_locator(mdates.WeekdayLocator(byweekday=0))
-ax.xaxis.set_minor_locator(mdates.DayLocator())
-ax.set_xlim(mdates.date2num(t_min) - 3, mdates.date2num(t_max) + 7)
+ax.xaxis.set_major_locator(mdates.MonthLocator())
+ax.xaxis.set_major_formatter(mdates.DateFormatter("%b '%y"))
+ax.xaxis.set_minor_locator(mdates.WeekdayLocator(byweekday=0))
+ax.tick_params(axis="x", which="major", labelsize=8.5, rotation=45)
+ax.set_xlim(mdates.date2num(t_min), mdates.date2num(t_max))
 ax.set_ylim(-1, N)
 ax.set_yticks([])
-ax.grid(axis="x", color="#ebebeb", linewidth=0.6, zorder=0)
+ax.grid(axis="x", which="major", color="#d8d8d8", linewidth=0.8, zorder=0)
+ax.grid(axis="x", which="minor", color="#efefef", linewidth=0.4, zorder=0)
 ax.spines[["top", "right", "left"]].set_visible(False)
 ax.set_title(
     "Interview timelines — faded bars = gap to next interview   solid bars = interview duration   ▲ = feedback submitted",
@@ -226,6 +295,9 @@ legend_items = [
 ] + [
     mlines.Line2D([], [], marker="^", color="w", markerfacecolor="#1e8449",
                   markersize=7, label="Feedback submitted"),
+    mpatches.Patch(facecolor="#2471a3", alpha=0.45, label="Applied → first IV"),
+    mpatches.Patch(facecolor="#117a65", alpha=0.45, label="Sourced → first IV"),
+    mpatches.Patch(facecolor="#884ea0", alpha=0.45, label="Referred → first IV"),
 ]
 ax.legend(handles=legend_items, loc="upper left", fontsize=8,
           ncol=len(legend_items), framealpha=0.9, edgecolor="#ccc")
@@ -257,11 +329,20 @@ ax.set_facecolor("#ffffff")
 iv_type_names = [t for t, _, _ in IV_TYPES if t != "Other"]
 iv_type_names.append("Other")
 
-# Count per type for all candidates combined
+# Count per type for all candidates combined.
+# For "Onsite": count distinct onsite DAYS per candidate (not individual slots),
+# since a single onsite day contains many back-to-back interview events.
 type_totals = Counter()
 for c in candidates:
+    onsite_days_seen = set()
     for iv in c.interviews:
-        type_totals[iv["type"]] += 1
+        if iv["type"] == "Onsite":
+            day_key = iv["dt"].date()
+            if day_key not in onsite_days_seen:
+                onsite_days_seen.add(day_key)
+                type_totals["Onsite"] += 1
+        else:
+            type_totals[iv["type"]] += 1
 
 type_order = sorted(type_totals.items(), key=lambda x: -x[1])
 t_labels = [t for t, _ in type_order]
@@ -273,7 +354,7 @@ ax.set_yticks(range(len(t_labels)))
 ax.set_yticklabels(t_labels, fontsize=9)
 ax.invert_yaxis()
 ax.set_xlabel("Total interviews conducted", fontsize=9)
-ax.set_title("Interview Volume by Type\n(across all 50 candidates)", fontsize=10, fontweight="bold", pad=4)
+ax.set_title("Interview Volume by Type\n(Onsite = days; all others = individual events)", fontsize=10, fontweight="bold", pad=4)
 ax.spines[["top", "right"]].set_visible(False)
 ax.grid(axis="x", color="#eeeeee")
 ax.set_xlim(0, max(t_vals) + 5)
