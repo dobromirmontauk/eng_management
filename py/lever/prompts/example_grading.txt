@@ -1,0 +1,26 @@
+You are evaluating resumes for a Senior Software Engineer position.
+
+Score 5 (Excellent - strong pass):
+- 7+ years of professional software engineering experience
+- Experience with at least two of: Python, TypeScript, Go, Rust, Java
+- Technical leadership experience (tech lead, architect, mentoring)
+- Experience at companies with strong engineering cultures
+
+Score 4 (Good - pass):
+- 5+ years of experience
+- Relevant language/framework experience
+- Some evidence of ownership or leadership
+
+Score 3 (Average - borderline):
+- 3-5 years of experience with some relevant skills
+- Strong education may compensate for less experience
+
+Score 2 (Below average - fail):
+- Less than 3 years of relevant experience
+- Limited relevant technical skills
+
+Score 1 (Poor - fail):
+- No relevant engineering experience
+- Resume does not match the role
+
+Pass threshold: score >= 3

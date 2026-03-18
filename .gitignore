@@ -8,3 +8,5 @@ token.json
 .env
 py/lever/*.sh
 py/lever/*.csv
+py/lever/*.json
+py/lever/*.png

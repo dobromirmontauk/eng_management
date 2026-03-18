@@ -1,0 +1,16 @@
+You Will Be
+Developing new computer vision algorithms with founders in C/C++ and Python for solving challenging real-world problems
+Coming up with large scale data collection techniques for training Deep Neural Nets
+Driving the development of new algorithms that dramatically improve our existing methods
+Researching and maintaining state-of-the-art ML/CV algorithms that can analyze images
+Coding full-stack building products from end to end
+Minimum Qualifications
+8+ years relevant coding experience
+Masters degree in Computer Science or related field
+Strong background in Computer Vision
+Exposure to new Deep Learning techniques for image recognition
+Preferred Qualifications
+MS/PhD degree or equivalent practical experience in Computer Science, AI, Machine Learning, or related technical field
+Experience with Python or C/C++ in a Linux environment
+Knowledge and experience in application of Deep Learning to Computer Vision problems
+Real-world experience building Computer Vision systems
